@@ -216,6 +216,10 @@ def main(argv=None) -> None:
         torch.cuda.empty_cache()
     base = AutoModelForCausalLM.from_pretrained(cfg["model"], dtype=torch.bfloat16 if cuda else torch.float32)
     merged = PeftModel.from_pretrained(base, str(ckpt_dir / f"checkpoint-{chosen['step']}")).merge_and_unload()
+    # chat model: stop on <|im_end|> as well as <|endoftext|> (HF generate, MLX, Ollama import read this)
+    eos = [tok.convert_tokens_to_ids("<|im_end|>"), tok.eos_token_id]
+    merged.config.eos_token_id = eos
+    merged.generation_config.eos_token_id = eos
     merged.save_pretrained(out / "merged", safe_serialization=True)
     tok.save_pretrained(out / "merged")
 
