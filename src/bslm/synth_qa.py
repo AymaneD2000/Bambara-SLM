@@ -110,12 +110,15 @@ def sheet(pattern: str = "*.jsonl", out: Path = SHEET) -> None:
 
 
 def apply() -> None:
-    n = {"ok": 0, "fix": 0, "no": 0, "pending": 0}
+    n = {"ok": 0, "fix": 0, "no": 0, "pending": 0, "fix_without_answer": 0}
     with OUT.open("w") as f:
         for r in (r for sh in sorted(SHEET.parent.glob("qa_review*.csv")) for r in csv.DictReader(sh.open())):
             d = (r["decision (ok / fix / no)"] or "").strip().lower()
+            if d == "fix" and not r["corrected_assistant"].strip():   # flagged wrong but no correction: keep out
+                n["fix_without_answer"] += 1
+                continue
             if d in ("ok", "fix"):
-                ans = r["corrected_assistant"].strip() if d == "fix" and r["corrected_assistant"].strip() else r["assistant"]
+                ans = r["corrected_assistant"].strip() if d == "fix" else r["assistant"]
                 split = "val" if int(hashlib.md5(r["id"].encode()).hexdigest(), 16) % 20 == 0 else "train"
                 hist = [[t.split("\nASSISTANT: ")[0].removeprefix("USER: "), t.split("\nASSISTANT: ")[1]]
                         for t in re.split(r"\n(?=USER: )", r["history"])] if r.get("history", "").strip() else None
