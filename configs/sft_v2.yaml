@@ -8,6 +8,7 @@ seed: 13
 out_dir: data/sft_v2
 system_prompt: "I ye dɛmɛbaga ye min bɛ bamanankan, faransikan ani angilɛkan fɔ."
 system_prompt_share: 0.5
+informal_spelling: {share: 0.15}   # French-style spelling (djon, kuntigui) on 15% of Bambara inputs
 synthetic_cap: 0.25            # max share of synthetic chat examples in train (brief §5 rule 5)
 
 parallel:                      # every pair is used in both directions (bam->X and X->bam)
@@ -58,6 +59,7 @@ tasks:                         # synthetic Bambara QA / summaries / chat, only r
     file: data/interim/qa_synthetic.jsonl
     synthetic: true
     accept: [accepted]
+    repeat: 3                  # ~450 reviewed rows would be 0.3% of the mix: show each 3 times
 
 instructions:                  # several phrasings, in French, English and Bambara; {x} = source text
   bam-fr:

@@ -25,3 +25,4 @@ reports/**/few_shot.json
 reports/**/human_prompts_outputs.jsonl
 reports/**/human_review*
 reports/human_review.csv
+reports/review/

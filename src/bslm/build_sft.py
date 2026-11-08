@@ -136,8 +136,10 @@ def _source_rows(sc: dict, split: str) -> list[dict]:
     return rows
 
 
-def _chat(cfg, rng, user, assistant, meta):
+def _chat(cfg, rng, user, assistant, meta, history=None):
     msgs = [{"role": "system", "content": cfg["system_prompt"]}] if rng.random() < cfg["system_prompt_share"] else []
+    for u, a in history or []:   # earlier turns are context only (loss is on the last assistant turn)
+        msgs += [{"role": "user", "content": u}, {"role": "assistant", "content": a}]
     msgs += [{"role": "user", "content": user}, {"role": "assistant", "content": assistant}]
     return {"messages": msgs, "meta": meta}
 
@@ -170,11 +172,14 @@ def _tasks_v2(cfg: dict, split: str, rng: random.Random) -> list[dict]:
             continue
         rows = [json.loads(l) for l in open(tc["file"])]
         rows = [r for r in rows if r.get("split", "train") == split and r.get("review", "accepted") in tc.get("accept", ["accepted"])]
-        for r in rows:
-            out.append(_chat(cfg, rng, r["user"], r["assistant"],
-                             {"id": r["id"], "direction": f"task-{r['task']}", "source": tc["name"],
-                              "synthetic": bool(r.get("synthetic", tc.get("synthetic"))), "generator": r.get("generator")}))
-        print(f"  [{tc['name']}] {split}: {len(rows)} examples")
+        reps = tc.get("repeat", 1) if split == "train" else 1   # small, human-reviewed sets are seen several times
+        for _ in range(reps):
+            for r in rows:
+                out.append(_chat(cfg, rng, r["user"], r["assistant"],
+                                 {"id": r["id"], "direction": f"task-{r['task']}", "source": tc["name"], "reviewed": True,
+                                  "synthetic": bool(r.get("synthetic", tc.get("synthetic"))), "generator": r.get("generator")},
+                                 history=r.get("history")))
+        print(f"  [{tc['name']}] {split}: {len(rows)} examples x{reps}")
     return out
 
 
@@ -196,6 +201,43 @@ def _raw_replay_v2(cfg: dict, n_chat: int, rng: random.Random) -> list[dict]:
             for i, t in enumerate(pieces[:n])]
 
 
+# Real users often write Bambara with French-style spelling (djon, kuntigui, ginini, djabi, mou, tché, è).
+# Applied only to user messages whose Bambara is an INPUT (bam->X translation, Bambara QA/chat); targets stay standard.
+_INFORMAL = [("ɛ", ("è", "e", "é")), ("Ɛ", ("È", "E")), ("ɔ", ("o", "ô")), ("Ɔ", ("O",)), ("ɲ", ("gn", "ny")),
+             ("Ɲ", ("Gn", "Ny")), ("ŋ", ("ng",)), ("Ŋ", ("Ng",))]
+
+
+def informal_spelling(text: str, rng: random.Random) -> str:
+    choice = {k: rng.choice(v) for k, v in _INFORMAL}
+    for k, v in choice.items():
+        text = text.replace(k, v)
+    if rng.random() < 0.7:
+        text = re.sub(r"(?<![a-zA-Z])j|(?<=[aeiouèéô ])j", "dj", text)          # jɔn -> djon
+    if rng.random() < 0.7:
+        text = re.sub(r"(?<!o)u", "ou", text)                                    # mun -> moun
+    if rng.random() < 0.6:
+        text = re.sub(r"g(?=[ie])", "gu", text)                                  # kuntigi -> kuntigui
+    if rng.random() < 0.5:
+        text = re.sub(r"c(?=[aeiouèéô])", rng.choice(["tch", "ty", "ti"]), text)  # ce -> tche
+    return text
+
+
+def _augment_informal(ex: list[dict], cfg: dict, rng: random.Random) -> int:
+    ic = cfg.get("informal_spelling")
+    if not ic:
+        return 0
+    n = 0
+    for e in ex:
+        d = e["meta"]["direction"]
+        if "messages" not in e or not (d.startswith("bam-") or d.startswith("task-")) or rng.random() >= ic["share"]:
+            continue
+        m = e["messages"][-2]          # last user turn
+        m["content"] = informal_spelling(m["content"], rng)
+        e["meta"]["informal"] = True
+        n += 1
+    return n
+
+
 def run_v2(cfg: dict) -> dict:
     rng = random.Random(cfg["seed"])
     out_dir = Path(cfg["out_dir"]); out_dir.mkdir(parents=True, exist_ok=True)
@@ -204,13 +246,16 @@ def run_v2(cfg: dict) -> dict:
     for split in ("train", "valid"):
         sp = "train" if split == "train" else "val"
         ex = _parallel_v2(cfg, sp, rng) + _tasks_v2(cfg, sp, rng) + (rep_train if split == "train" else rep_val)
-        syn = [e for e in ex if e["meta"]["synthetic"]]
+        syn = [e for e in ex if e["meta"]["synthetic"] and not e["meta"].get("reviewed")]   # reviewed rows are never dropped
+        n_rev = sum(1 for e in ex if e["meta"]["synthetic"] and e["meta"].get("reviewed"))
         cap = cfg.get("synthetic_cap")
-        if cap and split == "train" and len(syn) > cap * len(ex):   # drop random synthetic rows down to the cap
-            real = len(ex) - len(syn); keep = int(cap * real / (1 - cap))
+        if cap and split == "train" and len(syn) + n_rev > cap * len(ex):   # drop random unreviewed synthetic rows
+            real = len(ex) - len(syn) - n_rev; keep = max(0, int(cap * real / (1 - cap)) - n_rev)
             rng.shuffle(syn); drop = {id(e) for e in syn[keep:]}
             ex = [e for e in ex if id(e) not in drop]
             print(f"  synthetic capped at {cap:.0%}: kept {keep} of {len(syn)}")
+        if split == "train":
+            print(f"  informal spelling applied to {_augment_informal(ex, cfg, rng)} user inputs")
         if split == "train" and cfg.get("raw_replay"):
             ex += _raw_replay_v2(cfg, len(ex), rng)
         rng.shuffle(ex)
