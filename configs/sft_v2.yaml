@@ -45,6 +45,7 @@ parallel:                      # every pair is used in both directions (bam->X a
     sources: [pivot:bayelemabaga, pivot:jeli_asr]   # never MAFAND (test-only licence)
     synthetic: true
     min_words: 2
+    max_len_ratio: 2.5          # drops truncated / runaway MT outputs
     max_pairs: 30000
     max_val_pairs: 1000
   - name: bible                # verse-aligned bam/fr/en from Bible Brain (needs the supervisor's API key)
