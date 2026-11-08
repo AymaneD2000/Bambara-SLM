@@ -1,0 +1,22 @@
+# Alignment thresholds on align_score = P(aligned) (bslm align). Pairs below threshold are kept in
+# data/train/parallel_below_threshold.jsonl, never deleted.
+# Set 2026-11-05 from the supervisor's manual inspection (reports/alignment/inspection_results.md),
+# rule: keep every score range that is >= 80% correct (y = 1, ? = 0.5).
+# Caveat: inspected rows were the LOWEST-scoring part of each range (files were sorted by score), so measured
+# precision is a lower bound for each range.
+threshold:
+  bayelemabaga: 0.0                    # 83-97% correct in every range -> keep all (est. 94%)
+  jeli_asr: 0.4                        # 48-64% below 0.4, 80-97% from 0.4 (est. 95%)
+  bam_asr_all_extra_mali_pense: 0.4    # same group as jeli-asr
+  nllb_mined: 1.01                     # never in the main parallel set (0.80-0.87 band was 30-38% correct)
+  default: 0.5
+# Pairs whose source URL matches are excluded (kept in parallel_below_threshold.jsonl with reason):
+#  - bibles.org/dyu-*: Dioula (not Bambara) Bible text mined into NLLB "bam_Latn"; Bible data is also deferred
+#    to v2 by supervisor decision (2026-11-04).
+exclude_url_regex: ["bibles\\.org/dyu-"]
+
+# Supervisor decision 2026-11-05: NLLB pairs scoring >= 0.95 are used for continued pretraining ONLY (as text),
+# never for SFT translation data, and compared in a with/without ablation. The >= 0.95 band is not yet verified
+# by manual inspection (sample in reports/alignment/inspect_extra/).
+cpt_only_threshold:
+  nllb_mined: 0.95

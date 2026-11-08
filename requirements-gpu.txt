@@ -1,0 +1,8 @@
+# Stage 1 CPT on a CUDA box. Versions = the ones the dry run was validated with on 2026-11-05 (Mac).
+# torch is NOT pinned here: use the CUDA build preinstalled on the provider image (torch >= 2.6).
+transformers==5.22.1
+peft==0.21.2
+accelerate==1.15.0
+datasets==5.1.0
+pyyaml>=6.0
+huggingface_hub>=0.30

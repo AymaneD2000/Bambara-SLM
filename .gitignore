@@ -1,0 +1,27 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+data/**
+!data/**/.gitkeep
+runs/
+checkpoints/
+*.safetensors
+*.gguf
+dist/
+models/
+.venv-laser/
+
+# Public repo: no test-set outputs, dataset excerpts, native-speaker material or internal documents
+Agent brief*.md
+prompts/*.csv
+reports/*.log
+reports/samples/
+reports/alignment/inspect/
+reports/alignment/inspect_extra/
+reports/**/generations/
+reports/**/few_shot.json
+reports/**/human_prompts_outputs.jsonl
+reports/**/human_review*
+reports/human_review.csv

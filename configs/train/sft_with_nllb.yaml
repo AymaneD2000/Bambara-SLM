@@ -1,0 +1,43 @@
+# Stage 2 SFT on the merged CPT model (brief §11: LoRA r 16-64, lr 1e-4..2e-4, assistant-only loss, thinking disabled).
+# 1 epoch: every Bambara-French pair already appears twice (both directions), ~119 k examples, ~10 M tokens.
+model: runs/cpt_with_nllb/merged      # overridden on Kaggle by BSLM_BASE_MODEL
+data_dir: data/sft                    # {"messages": [...]} train.jsonl / valid.jsonl (bslm build-sft)
+raw_eval_dir: data/cpt/with_nllb      # valid_bam / valid_fr / valid_en.jsonl: forgetting check (raw text perplexity)
+output_dir: runs/sft_with_nllb
+seed: 13
+max_len: 512                          # longer examples dropped: 218 of 118,799 (0.18%); p99 = 245 tokens. Keeps T4 memory safe
+epochs: 1
+batch_size: auto                      # 16 (>=70 GB), 8 (>=35 GB), 4 (T4)
+examples_per_step: 32                 # effective batch kept constant
+grad_accum: 8                         # only used when batch_size is a number
+eval_batch_size: auto                 # 1 on T4, 2 (>=35 GB), 4 (>=70 GB): raw-text eval uses 2,048-token sequences
+learning_rate: 1.0e-4
+warmup_ratio: 0.03
+bf16: true                            # falls back to fp32 weights + fp16 mixed precision on T4
+lora:
+  r: 32
+  alpha: 64
+  dropout: 0.05
+  target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+eval_steps: 500
+logging_steps: 25
+sft_eval_examples: 1000               # held-out chat examples for eval_sft_loss
+raw_eval_examples: 100                # per language (bam, fr, en) for the forgetting check
+raw_eval_seq_len: 2048
+regression_limit: 0.10                # Bambara, French, English perplexity may rise at most +10% vs the CPT model
+sample_prompts:
+  - "Traduis en français : N bɛ taa sugu la sini."
+  - "Traduis en bambara : La maison est grande."
+  - "Réponds en bambara : Mali faaba ye min ye ?"
+  - "Quelle est la capitale du Mali ?"
+dry_run_overrides:
+  output_dir: runs/dryrun_sft
+  limit_examples: 24
+  sft_eval_examples: 8
+  raw_eval_examples: 2
+  raw_eval_seq_len: 256
+  batch_size: 2
+  grad_accum: 1
+  max_steps: 4
+  eval_steps: 2
+  num_workers: 0

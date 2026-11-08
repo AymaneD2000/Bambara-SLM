@@ -1,0 +1,31 @@
+# Continued-pretraining mix (brief §9.1). Gate 3 (2026-11-05): replay sources approved by the supervisor; mix
+# proportions left to the agent. Default kept at 25% replay with a French/English regression limit of +10% perplexity
+# (see configs/train/cpt_*.yaml); if the limit cannot be met, re-run with replay share 0.30 (brief §11 ablation).
+seed: 13
+seq_len: 2048                # max tokens per training example (Qwen3 tokenizer)
+eos: "<|endoftext|>"         # separator between documents packed in one example
+
+variants:
+  with_nllb: {include_cpt_only: true}    # + NLLB >= 0.95 pairs as text (supervisor decision: CPT only)
+  no_nllb:   {include_cpt_only: false}   # ablation baseline
+
+replay:
+  share: 0.25                # replay tokens / all training tokens
+  fr_fraction: 0.6           # of the replay budget
+  val_fraction: 0.03         # replay documents held out for French/English perplexity
+
+religious:
+  cap: 0.20                  # max share of Bambara tokens from religious-register items (keyword detector)
+
+parallel_templates:
+  # {b} = Bambara, {o} = other side. Picked at random per pair (fixed seed); both directions on purpose.
+  fr:
+    - "Bamanankan: {b}\nFaransikan: {o}"
+    - "Français : {o}\nBambara : {b}"
+    - "{b}\n{o}"
+    - "Bambara: {b}\nFrench: {o}"
+  en:
+    - "Bamanankan: {b}\nAngilɛkan: {o}"
+    - "English: {o}\nBambara: {b}"
+    - "{b}\n{o}"
+  pairs_per_block: 8         # consecutive pairs of the same document joined into one block (blank line between)

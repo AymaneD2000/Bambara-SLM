@@ -1,0 +1,98 @@
+# SFT data v2 (brief §9.2). User decisions 2026-11-08 (to confirm with the supervisor):
+#  - add Bambara<->English: FLORES dev (sib200_train, human), top NLLB bam-en subset, synthetic fr->en pivot, Bible Brain
+#  - MAFAND is NOT used: CC-BY-NC, approved test-only (PROVENANCE.md)
+#  - synthetic Bambara QA / summaries, filtered + human-checked (brief §5.4), via `tasks`
+#  - raw-text replay against forgetting (v1 lost +27% Bambara perplexity)
+# Build: python -m bslm.cli build-sft --config configs/sft_v2.yaml   -> data/sft_v2/
+seed: 13
+out_dir: data/sft_v2
+system_prompt: "I ye dɛmɛbaga ye min bɛ bamanankan, faransikan ani angilɛkan fɔ."
+system_prompt_share: 0.5
+synthetic_cap: 0.25            # max share of synthetic chat examples in train (brief §5 rule 5)
+
+parallel:                      # every pair is used in both directions (bam->X and X->bam)
+  - name: bayelemabaga_jeli    # same as v1
+    files: {train: data/train/parallel_train.jsonl, val: data/train/parallel_val.jsonl}
+    sources: [bayelemabaga, jeli_asr]
+    tgt_lang: fr
+    min_align_score: 0.4
+    max_pairs: 45000            # keeps the run within one Kaggle session (~11 h)
+  - name: flores_dev           # FLORES dev = sib200 train/dev splits (devtest stays evaluation-only)
+    files: {train: data/eval/sib200_train.jsonl, val: data/eval/sib200_dev.jsonl}
+    tgt_lang: [fr, en]
+  - name: smol                 # google/smol SmolSent + SmolDoc: professional en->bm translations, CC-BY-4.0
+    files: {train: {file: data/interim/smol_bam_en.jsonl, split: train}, val: {file: data/interim/smol_bam_en.jsonl, split: val}}
+    sources: [smol_smolsent, smol_smoldoc]
+    tgt_lang: en
+  - name: gatitos              # google/smol GATITOS: words / short phrases (lexicon), capped
+    files: {train: {file: data/interim/smol_bam_en.jsonl, split: train}, val: {file: data/interim/smol_bam_en.jsonl, split: val}}
+    sources: [smol_gatitos]
+    tgt_lang: en
+    max_pairs: 2000
+    max_val_pairs: 100
+  - name: nllb_en              # mined bam-en: score is saturated, so extra filters + cap (religious-heavy)
+    files: {train: data/train/parallel_cpt_only_train.jsonl, val: data/train/parallel_cpt_only_val.jsonl}
+    sources: [nllb_mined]
+    tgt_lang: en
+    min_align_score: 0.985
+    min_words: 4
+    max_len_ratio: 2.0
+    strip_verse_numbers: true
+    max_pairs: 6000
+  - name: pivot_en             # synthetic: French side machine-translated to English (bslm.pivot_en)
+    files: {train: {file: data/interim/pivot_en.jsonl, split: train}, val: {file: data/interim/pivot_en.jsonl, split: val}}
+    tgt_lang: en
+    sources: [pivot:bayelemabaga, pivot:jeli_asr]   # never MAFAND (test-only licence)
+    synthetic: true
+    min_words: 2
+    max_pairs: 30000
+    max_val_pairs: 1000
+  - name: bible                # verse-aligned bam/fr/en from Bible Brain (needs the supervisor's API key)
+    files: {train: {file: data/interim/bible_parallel.jsonl, split: train}, val: {file: data/interim/bible_parallel.jsonl, split: val}}
+    tgt_lang: [fr, en]
+    max_pairs: 8000            # religious register cap
+
+tasks:                         # synthetic Bambara QA / summaries / chat, only rows with review == accepted
+  - name: qa_synthetic
+    file: data/interim/qa_synthetic.jsonl
+    synthetic: true
+    accept: [accepted]
+
+instructions:                  # several phrasings, in French, English and Bambara; {x} = source text
+  bam-fr:
+    - "Traduis en français : {x}"
+    - "Translate into French: {x}"
+    - "Nin bamanankan bayɛlɛma tubabukan na : {x}"
+    - "Que veut dire cette phrase en français ? {x}"
+    - "{x}\n\nEn français :"
+  fr-bam:
+    - "Traduis en bambara : {x}"
+    - "Translate into Bambara: {x}"
+    - "Nin tubabukan bayɛlɛma bamanankan na : {x}"
+    - "Comment dit-on ceci en bambara ? {x}"
+    - "{x}\n\nBamanankan na :"
+  bam-en:
+    - "Translate into English: {x}"
+    - "Traduis en anglais : {x}"
+    - "Nin bamanankan bayɛlɛma angilɛkan na : {x}"
+    - "What does this Bambara sentence mean in English? {x}"
+    - "{x}\n\nIn English:"
+  en-bam:
+    - "Translate into Bambara: {x}"
+    - "Traduis en bambara : {x}"
+    - "Nin angilɛkan bayɛlɛma bamanankan na : {x}"
+    - "How do you say this in Bambara? {x}"
+    - "{x}\n\nBamanankan na :"
+
+replay:                        # French/English general instructions (human-written), as in v1
+  source: CohereLabs/aya_dataset
+  revision: f9ea04583f
+  languages: [French, English]
+  val_fraction: 0.02
+  max_chars: 4000
+
+raw_replay:                    # plain-text LM rows from the CPT mix (bam/fr/en), against forgetting
+  file: data/cpt/with_nllb/train.jsonl
+  share: 0.10                  # of the final train set
+  max_chars: 1500
+  min_chars: 200

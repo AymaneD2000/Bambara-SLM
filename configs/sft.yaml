@@ -1,0 +1,30 @@
+# SFT data (brief §9.2). Supervisor decision 2026-11-07: translation + French/English instruction replay.
+# Bambara QA/summarization/chat are NOT included in v1 (would need synthetic data or native-written examples).
+seed: 13
+system_prompt: "I ye dɛmɛbaga ye min bɛ bamanankan, faransikan ani angilɛkan fɔ."   # confirmed by the supervisor 2026-11-05
+sources:                     # high align_score pairs only; NLLB excluded from SFT (supervisor decision 2026-11-05)
+  - bayelemabaga
+  - jeli_asr
+min_align_score: 0.4
+directions: [bam-fr, fr-bam]  # no clean bam-en pairs exist yet
+system_prompt_share: 0.5      # half the examples carry the system prompt, half have none
+instructions:                 # several phrasings, in French, English and Bambara; {x} = source text
+  bam-fr:
+    - "Traduis en français : {x}"
+    - "Translate into French: {x}"
+    - "Nin bamanankan bayɛlɛma tubabukan na : {x}"
+    - "Que veut dire cette phrase en français ? {x}"
+    - "{x}\n\nEn français :"
+  fr-bam:
+    - "Traduis en bambara : {x}"
+    - "Translate into Bambara: {x}"
+    - "Nin tubabukan bayɛlɛma bamanankan na : {x}"
+    - "Comment dit-on ceci en bambara ? {x}"
+    - "{x}\n\nBamanankan na :"
+
+replay:                       # French/English general instructions (human-written), keeps instruction-following
+  source: CohereLabs/aya_dataset
+  revision: f9ea04583f
+  languages: [French, English]
+  val_fraction: 0.02
+  max_chars: 4000             # skip very long items (> ~1,000 tokens)

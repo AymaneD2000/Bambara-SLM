@@ -1,0 +1,82 @@
+# Cleaning configuration (brief §7). Every value here is reported in reports/cleaning_report.md.
+seed: 13
+
+normalize:
+  # Encoding confusables: code points from other scripts used by legacy fonts in place of Bambara letters.
+  # Evidence (contexts) in reports/gate1_report.md. Applied, and listed for supervisor approval.
+  confusables:
+    "\u03b5": "\u025b"          # ε Greek epsilon            -> ɛ
+    "\u1f72": "\u025b\u0300"    # ὲ Greek epsilon w/ varia   -> ɛ̀
+    "\u0454": "\u025b"          # є Cyrillic ukrainian ie    -> ɛ
+    "\u0511": "\u025b"          # ԑ Cyrillic reversed ze     -> ɛ
+    "\u037b": "\u0254"          # ͻ Greek reversed lunate sigma -> ɔ
+    "\u1d10": "\u0254"          # ᴐ small capital open o     -> ɔ
+    "\u05db": "\u0254"          # כ Hebrew kaf               -> ɔ
+    "\u0e27": "\u0254"          # ว Thai wo waen             -> ɔ
+    "\u0273": "\u0272"          # ɳ n with retroflex hook    -> ɲ
+    "\u03c0": "\u0272"          # π Greek pi                 -> ɲ   (e.g. damankɛπɛni)
+    "\u041b": "\u0272"          # Л Cyrillic El              -> ɲ   (e.g. Лini = ɲini)
+  # NOT mapped until the supervisor decides (reported only):
+  #   ʃ (U+0283, "sh" sound, e.g. Ayiʃa, ʃu); ñ (U+00F1, old spelling of ɲ / Spanish words)
+  pending_decision: ["\u0283", "\u00f1"]
+
+transcripts:
+  # Regexes, applied in order. Segments matching drop_regex have missing/unclear words -> dropped (brief §6.2).
+  drop_regex:
+    - "\\[\\?\\]"                       # afvoices: unclear word
+    - "\\[cs\\s*\\]"                    # afvoices: code-switched word replaced by tag (word missing)
+    - "<+\\s*INCOMPR"                    # kunkado: inaudible speech
+    - "<CHEVAUCHEMENT"                   # kunkado: overlapping speakers
+    - "<INVOCATION"                      # kunkado: prayer/quranic excerpt not transcribed
+  strip_regex:
+    - "\\[(noise|um|pause)\\]"
+    - "<(BRUITS|MUSIQUE[^>]*|RIRES|TOUX|ECHO|APPLAUDISSEMENTS|CRIS|PLEURES)>"
+  # kunkado wraps code-switched words in double underscores: keep the word (code-switching is legitimate)
+  unwrap_regex: "__\\s*([^_]+?)\\s*__"
+  # any bracket left after the above = unknown annotation -> drop
+  leftover_regex: "[\\[\\]<>]|__"
+  min_words: 4
+
+langid:
+  model: cis-lmu/glotlid
+  model_file: model_v3.bin
+  # GlotLID confuses Bambara with Dioula and other Manding languages; we score the Manding cluster.
+  manding_labels: [bam_Latn, dyu_Latn, mnk_Latn, emk_Latn, mlq_Latn, mku_Latn, kao_Latn]
+  # Threshold is calibrated on Bayelemabaga (known Bambara); see report. Lines below go to review.
+  manding_min: 0.5
+  # GlotLID is unreliable on short lines (64% of 1-3 word Bayelemabaga lines score < 0.5).
+  # Short lines are rejected only if confidently non-Manding. Calibration on Bayelemabaga train:
+  # false-reject 4.0% with these values (vs 10.4% manding-only, 34.1% bam_Latn-only).
+  short_words: 9
+  short_reject_conf: 0.9
+  # per-source mode:
+  #   filter_strict = drop unless Manding score >= manding_min at ANY length (noisy web sources)
+  #   filter        = drop with the length-aware rule
+  #   flag          = keep, write to review file (curated sources; GlotLID is unreliable on short lines)
+  mode:
+    madlad_bm: filter_strict
+    nllb_mined: filter_strict
+    wikipedia_bm: filter
+    default: flag
+
+quality:
+  min_chars: 10
+  min_doc_words: 10            # documents from DOC sources (wiki, madlad)
+  max_chars: 20000
+  min_letter_ratio: 0.6        # letters / non-space chars
+  max_digit_ratio: 0.3
+  max_dup_line_ratio: 0.3      # repeated lines within a document
+  max_top_trigram_ratio: 0.2   # most frequent word-trigram share (repetition filter)
+
+dedup:
+  minhash_num_perm: 64
+  minhash_threshold: 0.8
+  shingle_chars: 5
+  boilerplate_paragraph_min_count: 3   # paragraphs repeated in >= N documents are removed
+
+parallel:
+  min_words: 1
+  max_len_ratio: 3.0           # word-count ratio between sides (coarse; fine scoring at Gate 2)
+  other_lang_min: 0.5          # fra/eng side must be identified as fra/eng with this prob
+
+samples_per_source: 100

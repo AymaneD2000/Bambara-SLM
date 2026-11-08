@@ -1,0 +1,31 @@
+# Baseline / stage evaluation (brief §10). Fixed prompts and decoding, stored here; never change between stages.
+model: Qwen/Qwen3-1.7B-Base
+seed: 13
+
+mt:
+  # eval set -> number of sentences sampled (fixed seed). sib200_test = 204 FLORES devtest sentences (proxy for FLORES).
+  sets:
+    bayelemabaga_test: {n: 500, directions: [bam-fr, fr-bam]}
+    mafand_test:       {n: 500, directions: [bam-fr, fr-bam]}
+    sib200_test:       {n: 204, directions: [bam-fr, fr-bam, bam-en, en-bam]}
+  few_shot: 5
+  # few-shot examples are drawn from sets that are NOT evaluated on
+  few_shot_source:
+    fr: data/train/parallel_train.jsonl     # Bayelemabaga train, high align_score
+    en: data/eval/sib200_train.jsonl        # FLORES dev sentences (SIB train split), not the test split
+  max_new_tokens_factor: 2.0   # max tokens = factor * source tokens + 16
+  temperature: 0.0             # greedy
+  batch_size: 16
+  # chat models (after SFT): fixed zero-shot instructions, one per target language
+  chat_instruction:
+    fr: "Traduis en français : {x}"
+    bam: "Traduis en bambara : {x}"
+    en: "Translate into English: {x}"
+
+ppl:
+  # stratified by register so written/web Bambara are measured too (n = max texts per register)
+  bam_val: {file: data/train/mono_val.jsonl, n_per_register: {spoken: 500, web: 1000, written: 1000}}
+  belebele: {file: data/eval/belebele_passages.jsonl}   # same passages in bam / fra / eng
+  max_tokens: 1024
+
+lang_names: {bam: Bambara, fr: French, en: English}

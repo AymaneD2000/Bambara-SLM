@@ -1,0 +1,26 @@
+# Candidate sources (brief section 5). `role` is one of: mono, parallel, eval, model.
+# Status/licence are verified by `bslm inventory` and recorded in PROVENANCE.md.
+hf_datasets:
+  - {id: djelia/bambara-texts, role: mono}
+  - {id: RobotsMali/afvoices, role: mono, note: "transcripts, human-corrected subset"}
+  - {id: RobotsMali/afvoices-notag, role: mono}
+  - {id: RobotsMali/kunkado, role: mono}
+  - {id: RobotsMali/bam-asr-all, role: mono}
+  - {id: RobotsMali/jeli-asr, role: mono}
+  - {id: RobotsMaliAI/bayelemabaga, role: parallel}
+  - {id: masakhane/mafand, role: parallel, note: "check for fr-bam config"}
+  - {id: openlanguagedata/flores_plus, role: eval, note: "bam_Latn, fra_Latn, eng_Latn"}
+  - {id: facebook/belebele, role: eval, note: "bam_Latn config?"}
+  - {id: Davlan/sib200, role: eval, note: "bam_Latn config?"}
+  - {id: allenai/MADLAD-400, role: mono, note: "check bm config"}
+  - {id: allenai/nllb, role: parallel, note: "check bam_Latn pairs"}
+  - {id: oza75/bambara-tts, role: mono, note: "gated; transcripts only"}
+hf_models:
+  - {id: Qwen/Qwen3-1.7B-Base, role: model}
+  - {id: facebook/nllb-200-distilled-600M, role: model, note: "MT reference"}
+  - {id: cis-lmu/glotlid, role: model, note: "language ID; check bam_Latn label"}
+other:
+  - {name: bmwiki dump, url: "https://dumps.wikimedia.org/bmwiki/latest/"}
+  - {name: Bible Brain API, url: "https://4.dbt.io", note: "needs BIBLE_BRAIN_API_KEY"}
+  - {name: Corpus Bambara de Reference, url: "http://cormand.huma-num.fr/"}
+  - {name: Bambara Normalizer, url: "https://github.com/RobotsMali-AI"}

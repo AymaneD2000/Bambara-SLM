@@ -1,0 +1,42 @@
+# Stage 1 CPT on a single CUDA GPU (A100/H100 class). Brief §11 starting points, adapted to our small corpus:
+# the brief's 0.25-0.5 M tokens/step would give only ~50 optimizer steps per epoch on 14 M tokens, so we use
+# ~65 k tokens/step (32 sequences x 2,048) for ~200+ steps per epoch.
+model: Qwen/Qwen3-1.7B-Base
+model_revision: null          # pinned at run time in env.json / pip_freeze.txt; set a sha here for exact reruns
+data_dir: data/cpt/with_nllb
+output_dir: runs/cpt_with_nllb
+seed: 13
+seq_len: 2048
+epochs: 2
+batch_size: auto              # from GPU memory: 8 (>=70 GB), 4 (>=35 GB), 2 (>=20 GB), 1 (smaller, e.g. T4)
+sequences_per_step: 32        # effective batch kept constant: grad_accum = 32 / batch_size
+grad_accum: 4                 # used only when batch_size is a number
+learning_rate: 2.0e-4
+warmup_ratio: 0.03
+weight_decay: 0.0
+bf16: true                    # falls back to fp16 on GPUs without bf16 (T4)
+gradient_checkpointing: true
+attn_implementation: sdpa     # flash_attention_2 if installed on the GPU box
+lora:
+  r: 64
+  alpha: 128
+  dropout: 0.05
+  target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+eval_steps: 50
+logging_steps: 10
+regression_limit: 0.10        # French and English perplexity may rise at most +10% vs the starting model
+sample_prompts:
+  - "Bamakɔ ye"
+  - "Sɛnɛkɛlaw bɛ"
+  - "Bamanankan: N bɛ taa sugu la sini.\nFaransikan:"
+dry_run_overrides:            # --dry-run: validates the code path on any machine in minutes
+  output_dir: runs/dryrun_cpt_with_nllb
+  limit_examples: 16
+  limit_eval_examples: 4
+  seq_len: 256
+  batch_size: 2
+  grad_accum: 1
+  max_steps: 4
+  eval_steps: 2
+  bf16: false
+  num_workers: 0

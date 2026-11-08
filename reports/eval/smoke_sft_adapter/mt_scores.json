@@ -1,0 +1,50 @@
+{
+  "bayelemabaga_test:bam-fr": {
+    "n": 30,
+    "bleu": 0.13,
+    "chrf++": 9.16,
+    "seconds": 53.6
+  },
+  "bayelemabaga_test:fr-bam": {
+    "n": 30,
+    "bleu": 0.21,
+    "chrf++": 3.56,
+    "seconds": 22.4
+  },
+  "mafand_test:bam-fr": {
+    "n": 30,
+    "bleu": 0.05,
+    "chrf++": 8.22,
+    "seconds": 65.9
+  },
+  "mafand_test:fr-bam": {
+    "n": 30,
+    "bleu": 0.37,
+    "chrf++": 3.76,
+    "seconds": 40.1
+  },
+  "sib200_test:bam-fr": {
+    "n": 30,
+    "bleu": 0.07,
+    "chrf++": 7.99,
+    "seconds": 52.3
+  },
+  "sib200_test:fr-bam": {
+    "n": 30,
+    "bleu": 0.09,
+    "chrf++": 2.5,
+    "seconds": 37.4
+  },
+  "sib200_test:bam-en": {
+    "n": 30,
+    "bleu": 0.04,
+    "chrf++": 7.08,
+    "seconds": 54.4
+  },
+  "sib200_test:en-bam": {
+    "n": 30,
+    "bleu": 0.22,
+    "chrf++": 3.94,
+    "seconds": 31.3
+  }
+}

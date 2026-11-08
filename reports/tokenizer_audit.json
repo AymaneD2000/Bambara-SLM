@@ -1,0 +1,48 @@
+{
+  "results": {
+    "bam_Latn": {
+      "passages": 488,
+      "tokens": 102966,
+      "words": 39745,
+      "tok_per_word": 2.590665492514782,
+      "chars_per_tok": 2.1673950624477984
+    },
+    "fra_Latn": {
+      "passages": 488,
+      "tokens": 75567,
+      "words": 44448,
+      "tok_per_word": 1.7001214902807775,
+      "chars_per_tok": 3.6476504294202496
+    },
+    "eng_Latn": {
+      "passages": 488,
+      "tokens": 48219,
+      "words": 38737,
+      "tok_per_word": 1.2447788935642925,
+      "chars_per_tok": 4.812397602604783
+    }
+  },
+  "ratio_bam_fra": 1.5238119789233002,
+  "decision": "KEEP original tokenizer",
+  "char_cost": {
+    "ɛ": 1,
+    "ɔ": 1,
+    "ɲ": 1,
+    "ŋ": 1,
+    "Ɛ": 1,
+    "Ɔ": 2,
+    "Ɲ": 1,
+    "Ŋ": 1,
+    "à": 1,
+    "á": 1,
+    "è": 1,
+    "é": 1,
+    "ì": 1,
+    "í": 1,
+    "ò": 1,
+    "ó": 1,
+    "ù": 1,
+    "ú": 1,
+    "ʃ": 1
+  }
+}
