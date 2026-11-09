@@ -1,0 +1,39 @@
+# Phase 3 synthetic data (src/bslm/v3data/generate.py). Model = SFT v2 (chat template, thinking off).
+model: runs/sft_v2/merged          # overridden by --model (Kaggle: the merged/ folder of results_sft_v2.zip)
+
+prompts:                           # same zero-shot instructions as configs/eval.yaml (what v2 was evaluated with)
+  bam-fr: "Traduis en français : {x}"
+  bam-en: "Translate into English: {x}"
+  fr-bam: "Traduis en bambara : {x}"
+  en-bam: "Translate into Bambara: {x}"
+
+generation:
+  eos_token_ids: [151645, 151643]  # <|im_end|>, <|endoftext|>
+  max_new_factor: {bam: 2.5, fr: 2.0, en: 2.0}   # max new tokens = factor * source tokens + 16 (Bambara needs more)
+  max_new_cap: 256
+  repetition_penalty: 1.0          # first pass
+  retries: 2                       # outputs that hit max tokens or loop are regenerated (sampling) up to N times
+  retry_repetition_penalty: 1.15
+  max_sentence_words: 60           # longer sentences are cut at ; : , before translation
+  sample: {temperature: 0.7, top_p: 0.9}          # back-translation (Edunov et al. 2018); --decode greedy to disable
+  hf: {batch_size: 64, batch_tokens: 40000}       # length-sorted batches; batch_tokens caps batch*(prompt+new)
+  vllm: {gpu_memory_utilization: 0.88, max_model_len: 2048}
+  mlx: {batch_size: 16}
+
+prep_bt:
+  target: 60000
+  min_words: 8
+  max_words: 60
+  max_sentences: 3
+  kunkado_max: 20000               # spoken register; the rest is filled with MADLAD segments
+  madlad_max_per_doc: 120          # diversity: at most N segments per MADLAD document
+
+filter:
+  bam_lid_min: 0.9                 # Manding-cluster probability (GlotLID mixes bam/dyu) of the Bambara side
+  other_lid_min: 0.9               # fra_Latn / eng_Latn probability of the French / English side
+  len_ratio: [0.5, 2.0]            # chars(target) / chars(source)
+  rt_drop_fraction: 0.4            # drop the bottom 40% by round-trip chrF, per source (among rows passing the rest)
+  chat_rt_level: conversation      # conversation: percentile on the length-weighted mean of its messages; message: each
+  drop_truncated: true             # any sentence that hit max_new_tokens
+  review_per_category: 200
+  seed: 13

@@ -51,7 +51,7 @@ def run(config: str = "configs/clean.yaml", seed: int = 13) -> dict:
     for split, p in paths.items():
         for i, r in enumerate(pq.read_table(p).to_pylist()):
             st["read"] += 1
-            a, b = LANG.get(str(r["source_lang"]).lower()), LANG.get(str(r["target_lang"]).lower())
+            a, b = (LANG.get(str(r[k]).lower().split("_")[0]) for k in ("source_lang", "target_lang"))  # e.g. bam_Latn
             sa, sb = normalize(r["source_text"] or "", conf), normalize(r["target_text"] or "", conf)
             if b == "bam":
                 a, b, sa, sb = b, a, sb, sa
