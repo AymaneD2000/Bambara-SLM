@@ -106,15 +106,24 @@ class TimeBudget(TrainerCallback):
 
 class Pruner(TrainerCallback):
     """Keep only the latest checkpoint (to resume) and the best qualified one so far (lowest Bambara loss with
-    French/English perplexity within the regression limit). Caps disk use at ~2 checkpoints (Colab Drive quota)."""
+    French/English perplexity within the regression limit). Caps disk use at ~2 checkpoints (Colab Drive quota).
+    select_key may be a '+'-joined sum of eval metrics (e.g. "eval_sft_loss+eval_chat_loss").
+    keep_best_unqualified=True (SFT `fallback_selection: best_sft`): ALSO keep the best checkpoint by select_key
+    ignoring the regression limit, so the fallback can still pick it at the end (up to 3 checkpoints on disk)."""
 
     def __init__(self, ckpt_dir: Path, hist: "History", limit: float,
-                 select_key: str = "eval_bam_loss", limit_langs: tuple = ("fr", "en")):
+                 select_key: str = "eval_bam_loss", limit_langs: tuple = ("fr", "en"),
+                 keep_best_unqualified: bool = False):
         self.ckpt_dir, self.hist, self.limit, self.start = ckpt_dir, hist, limit, None
         self.select_key, self.limit_langs = select_key, limit_langs
+        self.keys = [k.strip() for k in select_key.split("+")]
+        self.keep_best_unqualified = keep_best_unqualified
+
+    def score(self, r: dict) -> float:
+        return sum(r[k] for k in self.keys)
 
     def _qualified(self, r: dict) -> bool:
-        keys = [self.select_key] + [f"eval_{lg}_loss" for lg in self.limit_langs]
+        keys = self.keys + [f"eval_{lg}_loss" for lg in self.limit_langs]
         return all(k in r for k in keys) and all(
             math.exp(r[f"eval_{lg}_loss"]) <= (1 + self.limit) * math.exp(self.start[f"eval_{lg}_loss"])
             for lg in self.limit_langs)
@@ -126,7 +135,12 @@ class Pruner(TrainerCallback):
               and (self.ckpt_dir / f"checkpoint-{r['step']}").exists()]
         keep = {f"checkpoint-{state.global_step}"}
         if ok:
-            keep.add(f"checkpoint-{min(ok, key=lambda r: r[self.select_key])['step']}")
+            keep.add(f"checkpoint-{min(ok, key=self.score)['step']}")
+        if self.keep_best_unqualified:
+            rows = [r for r in self.hist.rows if r["step"] > 0 and all(k in r for k in self.keys)
+                    and (self.ckpt_dir / f"checkpoint-{r['step']}").exists()]
+            if rows:
+                keep.add(f"checkpoint-{min(rows, key=self.score)['step']}")
         for d in self.ckpt_dir.glob("checkpoint-*"):
             if d.name not in keep:
                 shutil.rmtree(d, ignore_errors=True)

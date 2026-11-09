@@ -154,10 +154,14 @@ def _parallel_v2(cfg: dict, split: str, rng: random.Random) -> list[dict]:
         for r in rows:
             for d in _DIRS[r["tgt_lang"]]:
                 src, tgt = (r["src_text"], r["tgt_text"]) if d.startswith("bam-") else (r["tgt_text"], r["src_text"])
-                out.append(_chat(cfg, rng, rng.choice(cfg["instructions"][d]).format(x=src), tgt,
-                                 {"id": r["id"], "direction": d, "source": sc["name"],
-                                  "synthetic": bool(sc.get("synthetic") or r.get("synthetic")),
-                                  "generator": r.get("generator")}))
+                instr = rng.choice(cfg["instructions"][d])
+                e = _chat(cfg, rng, instr.format(x=src), tgt,
+                          {"id": r["id"], "direction": d, "source": sc["name"],
+                           "synthetic": bool(sc.get("synthetic") or r.get("synthetic")),
+                           "generator": r.get("generator")})
+                if d.startswith("bam-"):
+                    e["_bam_input"] = (instr, src)   # informal spelling goes on {x} only, never on the instruction
+                out.append(e)
         print(f"  [{sc['name']}] {split}: {len(rows)} pairs")
     return out
 
@@ -207,22 +211,63 @@ _INFORMAL = [("ɛ", ("è", "e", "é")), ("Ɛ", ("È", "E")), ("ɔ", ("o", "ô"))
              ("Ɲ", ("Gn", "Ny")), ("ŋ", ("ng",)), ("Ŋ", ("Ng",))]
 
 
-def informal_spelling(text: str, rng: random.Random) -> str:
+def _informal_style(rng: random.Random):
+    """Draw one writer's informal spelling habits; returns text -> text (same habits for every turn of a row).
+    Draws from rng in a fixed order that does not depend on the text (deterministic with the seed)."""
     choice = {k: rng.choice(v) for k, v in _INFORMAL}
-    for k, v in choice.items():
-        text = text.replace(k, v)
-    if rng.random() < 0.7:
-        text = re.sub(r"(?<![a-zA-Z])j|(?<=[aeiouèéô ])j", "dj", text)          # jɔn -> djon
-    if rng.random() < 0.7:
-        text = re.sub(r"(?<!o)u", "ou", text)                                    # mun -> moun
-    if rng.random() < 0.6:
-        text = re.sub(r"g(?=[ie])", "gu", text)                                  # kuntigi -> kuntigui
-    if rng.random() < 0.5:
-        text = re.sub(r"c(?=[aeiouèéô])", rng.choice(["tch", "ty", "ti"]), text)  # ce -> tche
-    return text
+    dj, ou, gu = rng.random() < 0.7, rng.random() < 0.7, rng.random() < 0.6
+    tch = rng.choice(["tch", "ty", "ti"]) if rng.random() < 0.5 else None
+
+    def apply(text: str) -> str:
+        for k, v in choice.items():
+            text = text.replace(k, v)
+        if dj:
+            text = re.sub(r"(?<![a-zA-Z])j|(?<=[aeiouèéô ])j", "dj", text)          # jɔn -> djon
+        if ou:
+            text = re.sub(r"(?<!o)u", "ou", text)                                    # mun -> moun
+        if gu:
+            text = re.sub(r"g(?=[ie])", "gu", text)                                  # kuntigi -> kuntigui
+        if tch:
+            text = re.sub(r"c(?=[aeiouèéô])", tch, text)                            # ce -> tche
+        return text
+    return apply
+
+
+def informal_spelling(text: str, rng: random.Random) -> str:
+    return _informal_style(rng)(text)
+
+
+# Task rows mix languages inside one user message ("Lis ce texte en bambara et réponds en bambara : <passage>\n\n
+# Question : Où ... ?"), and some chat rows are fully French/English. Only segments that look Bambara are changed.
+_SEG = re.compile(r"(\n+|:\s+|\?\s+|(?<=[.!])\s+)")
+_BAM_CH = re.compile(r"[ɛɔɲŋƐƆƝŊ]")
+_FR_CH = re.compile(r"[éèêàâçùûôîœ]", re.I)
+_FR_EN_WORDS = set("""le les des du une un est sont et ou que qui quoi quel quelle quels dans pour avec sur par pas
+ce cette ces il elle ils elles nous vous je tu mon ton son leur texte lis réponds résume traduis question réponse
+comment pourquoi où quand phrase en français anglais bambara peux peut fais dis the and is are of to what this that
+in read answer question summarize translate does how why where when you your can it with from text sentence english
+french""".split())
+_BAM_WORDS = set("""ye bɛ be tɛ te ka ko ni ma min don kan la na nin o a n i u aw an k' b' t' y' tun kɔ kɔnɔ fɛ ani
+walima mun jɔn di cogo yɔrɔ tuma bi sini kunun dɔ dɔw bɛɛ""".split())
+
+
+def _looks_bambara(seg: str) -> bool:
+    words = re.findall(r"[^\W\d_]+'?", seg.lower())
+    if not words or _FR_CH.search(seg):
+        return False
+    fr_en = sum(w in _FR_EN_WORDS for w in words)
+    bam = sum(w in _BAM_WORDS for w in words) + len(_BAM_CH.findall(seg))
+    return bam > 0 and fr_en == 0 or bam >= 3 * fr_en > 0
+
+
+def _informal_bambara_only(text: str, style) -> str:
+    return "".join(style(p) if i % 2 == 0 and _looks_bambara(p) else p for i, p in enumerate(_SEG.split(text)))
 
 
 def _augment_informal(ex: list[dict], cfg: dict, rng: random.Random) -> int:
+    """French-style spelling on `share` of the eligible rows (bam->X translations and Bambara tasks), Bambara text only:
+    translation rows: the source {x} (re-formatted into the same instruction); task rows: Bambara segments of every
+    user turn (history included). French/English text, instructions and assistant targets are never changed."""
     ic = cfg.get("informal_spelling")
     if not ic:
         return 0
@@ -231,10 +276,21 @@ def _augment_informal(ex: list[dict], cfg: dict, rng: random.Random) -> int:
         d = e["meta"]["direction"]
         if "messages" not in e or not (d.startswith("bam-") or d.startswith("task-")) or rng.random() >= ic["share"]:
             continue
-        m = e["messages"][-2]          # last user turn
-        m["content"] = informal_spelling(m["content"], rng)
-        e["meta"]["informal"] = True
-        n += 1
+        style = _informal_style(rng)
+        if "_bam_input" in e:
+            instr, x = e["_bam_input"]
+            e["messages"][-2]["content"] = instr.format(x=style(x))      # last user turn
+            changed = True
+        else:
+            changed = False
+            for m in e["messages"]:
+                if m["role"] == "user":
+                    new = _informal_bambara_only(m["content"], style)
+                    changed |= new != m["content"]
+                    m["content"] = new
+        if changed:
+            e["meta"]["informal"] = True
+            n += 1
     return n
 
 

@@ -40,14 +40,24 @@ LANGS = ("bam", "fr", "en")
 CHAT_TOKENS = ("<|im_start|>", "<|im_end|>", "<think>", "</think>")
 
 
-def _init_chat_token_rows(model, tok) -> list[int]:
+def _chat_token_ids(tok) -> list[int]:
+    ids = [tok.convert_tokens_to_ids(t) for t in CHAT_TOKENS]
+    assert len(set(ids)) == len(ids) and all(isinstance(i, int) and i > tok.eos_token_id for i in ids), ids
+    return ids
+
+
+def _init_chat_token_rows(model, tok, init: bool = True) -> list[int]:
     """Qwen3-*-Base ships ALL special tokens after <|endoftext|> with one identical, untrained embedding row
     (norm 0.375 vs median ~1.6; tied to lm_head). LoRA on attn/MLP cannot separate them, so the SFT model never
     emits <|im_end|>. Give the chat tokens distinct starting rows (<|im_end|> <- trained <|endoftext|> row, the
     others <- mean row + small noise) and train exactly those rows via PEFT trainable_token_indices (which saves
-    absolute row values, so merging onto the unmodified base model reproduces them)."""
-    ids = [tok.convert_tokens_to_ids(t) for t in CHAT_TOKENS]
-    assert len(set(ids)) == len(ids) and all(isinstance(i, int) and i > tok.eos_token_id for i in ids), ids
+    absolute row values, so merging onto the unmodified base model reproduces them).
+    init=False (train config `init_chat_tokens: false`): the starting model is already chat-trained (e.g. a v3
+    stage on top of an SFT'd model), so its rows are kept as they are; the same ids are still trained."""
+    ids = _chat_token_ids(tok)
+    if not init:
+        print("chat token rows kept (init_chat_tokens: false):", dict(zip(CHAT_TOKENS, ids)))
+        return ids
     E = model.get_input_embeddings().weight
     with torch.no_grad():
         ref = E[: tok.convert_tokens_to_ids("<|endoftext|>")].float()
@@ -61,7 +71,39 @@ def _init_chat_token_rows(model, tok) -> list[int]:
     return ids
 
 
-def _chat_features(tok, max_len: int):
+def _earlier_assistant_spans(tok, ids: list[int], end: int) -> list[tuple[int, int]]:
+    """[start, stop) token spans of every assistant turn that starts before position `end` (the final answer's
+    prompt length): content + closing <|im_end|>. Found in the token ids: <|im_start|> assistant <newline> ...
+    <|im_end|>. An empty think block right after the header (only rendered before the final answer by the Qwen3
+    template with enable_thinking=False, but checked anyway) stays masked."""
+    im_start, im_end = tok.convert_tokens_to_ids("<|im_start|>"), tok.convert_tokens_to_ids("<|im_end|>")
+    role = tok("assistant", add_special_tokens=False)["input_ids"]
+    think = tok("<think>\n\n</think>\n\n", add_special_tokens=False)["input_ids"]
+    spans, i = [], 0
+    while i < end:
+        if ids[i] == im_start and ids[i + 1: i + 1 + len(role)] == role:
+            a = i + 1 + len(role) + 1                     # skip the newline after the role name
+            if ids[a: a + len(think)] == think:
+                a += len(think)
+            b = a
+            while b < end and ids[b] != im_end:
+                b += 1
+            if b < end:                                   # closed turn: content + <|im_end|>
+                spans.append((a, b + 1))
+            i = b + 1
+        else:
+            i += 1
+    return spans
+
+
+def _chat_features(tok, max_len: int, all_turns: bool = False):
+    """Tokenise chat rows with the Qwen3 template (thinking disabled) and mask everything but the answer.
+
+    all_turns=False (v2): loss on the LAST assistant turn only (its content, <|im_end|> and the trailing newline).
+    all_turns=True (train config `loss_all_assistant_turns`): also on every earlier assistant turn (content +
+    <|im_end|>). The final turn is labelled exactly as with False, so single-turn rows are identical either way.
+    Rows longer than max_len are DROPPED, never truncated: no answer is ever cut and a conversation never loses
+    its final answer (multi-turn rows are rare and short; the drop count is printed by load_chat)."""
     def f(batch):
         out = {"input_ids": [], "labels": []}
         texts = batch["text"] if "text" in batch else [None] * len(batch["messages"])
@@ -73,14 +115,24 @@ def _chat_features(tok, max_len: int):
             full = tok.apply_chat_template(msgs, tokenize=False, enable_thinking=False)
             prompt = tok.apply_chat_template(msgs[:-1], tokenize=False, add_generation_prompt=True, enable_thinking=False)
             ids = tok(full, add_special_tokens=False)["input_ids"]
-            n_prompt = len(tok(prompt, add_special_tokens=False)["input_ids"])
-            if len(ids) > max_len or n_prompt >= len(ids):
-                out["input_ids"].append([]); out["labels"].append([])   # dropped below (too long)
+            p_ids = tok(prompt, add_special_tokens=False)["input_ids"]
+            n_prompt = len(p_ids)
+            if len(ids) > max_len or n_prompt >= len(ids) or (all_turns and ids[:n_prompt] != p_ids):
+                out["input_ids"].append([]); out["labels"].append([])   # dropped below (too long / inconsistent)
                 continue
+            labels = [-100] * n_prompt + ids[n_prompt:]
+            if all_turns:
+                for a, b in _earlier_assistant_spans(tok, ids, n_prompt):
+                    labels[a:b] = ids[a:b]
             out["input_ids"].append(ids)
-            out["labels"].append([-100] * n_prompt + ids[n_prompt:])
+            out["labels"].append(labels)
         return out
     return f
+
+
+def _select_keys(cfg: dict) -> list[str]:
+    """`select_key`: one eval metric or a '+'-joined sum, e.g. eval_sft_loss+eval_chat_loss (default eval_sft_loss)."""
+    return [k.strip() for k in cfg.get("select_key", "eval_sft_loss").split("+")]
 
 
 def main(argv=None) -> None:
@@ -125,7 +177,7 @@ def main(argv=None) -> None:
     model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
     model.enable_input_require_grads()
     lc = cfg["lora"]
-    chat_ids = _init_chat_token_rows(model, tok)
+    chat_ids = _init_chat_token_rows(model, tok, init=cfg.get("init_chat_tokens", True))
     model = get_peft_model(model, LoraConfig(r=lc["r"], lora_alpha=lc["alpha"], lora_dropout=lc["dropout"],
                                              target_modules=lc["target_modules"], task_type="CAUSAL_LM",
                                              trainable_token_indices={"embed_tokens": chat_ids}))
@@ -133,12 +185,19 @@ def main(argv=None) -> None:
 
     sft_dir, raw_dir = Path(cfg["data_dir"]), Path(cfg["raw_eval_dir"])
 
+    all_turns = bool(cfg.get("loss_all_assistant_turns", False))
+
     def load_chat(fn, limit=None):
-        ds = load_dataset("json", data_files=str(sft_dir / fn), split="train")
+        path = fn if isinstance(fn, Path) else sft_dir / fn     # chat_eval_file: a path (relative to the cwd)
+        ds = load_dataset("json", data_files=str(path), split="train")
         if limit:
             ds = ds.shuffle(seed=cfg["seed"]).select(range(min(limit, len(ds))))
-        ds = ds.map(_chat_features(tok, cfg["max_len"]), batched=True, remove_columns=ds.column_names)
-        return ds.filter(lambda x: len(x["input_ids"]) > 0)
+        ds = ds.map(_chat_features(tok, cfg["max_len"], all_turns), batched=True, remove_columns=ds.column_names)
+        n = len(ds)
+        ds = ds.filter(lambda x: len(x["input_ids"]) > 0)
+        if n > len(ds):
+            print(f"{path}: {n - len(ds)} of {n} rows dropped (longer than max_len={cfg['max_len']})")
+        return ds
 
     def load_raw(fn, limit=None):
         ds = load_dataset("json", data_files=str(raw_dir / fn), split="train")
@@ -149,7 +208,13 @@ def main(argv=None) -> None:
 
     train_ds = load_chat("train.jsonl", cfg.get("limit_examples")).shuffle(seed=cfg["seed"])
     eval_ds = {"sft": load_chat("valid.jsonl", cfg["sft_eval_examples"])}
+    if cfg.get("chat_eval_file"):    # multi-turn chat eval set, logged as eval_chat_loss (usable in select_key)
+        eval_ds["chat"] = load_chat(Path(cfg["chat_eval_file"]), cfg.get("chat_eval_examples"))
     eval_ds.update({lg: load_raw(f"valid_{lg}.jsonl", cfg["raw_eval_examples"]) for lg in LANGS})
+    sel = _select_keys(cfg)
+    missing = [k for k in sel if k.removeprefix("eval_").removesuffix("_loss") not in eval_ds]
+    if missing:
+        sys.exit(f"select_key {cfg.get('select_key')!r}: no eval set for {missing} (chat_eval_file missing?)")
     print(f"train examples: {len(train_ds):,}; eval: " + ", ".join(f"{k}={len(v)}" for k, v in eval_ds.items()))
 
     args = TrainingArguments(
@@ -164,7 +229,8 @@ def main(argv=None) -> None:
         dataloader_num_workers=cfg.get("num_workers", 2), remove_unused_columns=False,
     )
     hist = History(out / "eval_history.json")
-    pruner = Pruner(out / "checkpoints", hist, cfg["regression_limit"], select_key="eval_sft_loss", limit_langs=LANGS)
+    pruner = Pruner(out / "checkpoints", hist, cfg["regression_limit"], select_key="+".join(sel), limit_langs=LANGS,
+                    keep_best_unqualified=cfg.get("fallback_selection") == "best_sft")
     budget = TimeBudget(float(os.environ["BSLM_MAX_HOURS"]) if os.environ.get("BSLM_MAX_HOURS") else None)
     trainer = Trainer(model=model, args=args, train_dataset=train_ds, eval_dataset=eval_ds,
                       data_collator=Collator(tok.pad_token_id if tok.pad_token_id is not None else tok.eos_token_id),
@@ -188,19 +254,23 @@ def main(argv=None) -> None:
         print("STOPPED ON TIME BUDGET: not finished. Run the same command again (any machine) to resume.")
         sys.exit(3)
 
-    need = ["eval_sft_loss"] + [f"eval_{lg}_loss" for lg in LANGS]
+    lang_keys = [f"eval_{lg}_loss" for lg in LANGS]
+    need = list(dict.fromkeys(["eval_sft_loss"] + sel + lang_keys))
     rows = [r for r in hist.rows if r["step"] > 0 and all(k in r for k in need) and (ckpt_dir / f"checkpoint-{r['step']}").exists()]
     ok = [r for r in rows if pruner._qualified(r)]
-    chosen = min(ok, key=lambda r: r["eval_sft_loss"]) if ok else None
+    chosen = min(ok, key=pruner.score) if ok else None
     fallback = None
     if not chosen and cfg.get("fallback_selection") == "best_sft" and rows:
-        # user decision 2026-11-08: still ship the best-SFT-loss checkpoint, flagged in selection.json
-        chosen = min(rows, key=lambda r: r["eval_sft_loss"])
-        fallback = f"no checkpoint within the +{cfg['regression_limit']:.0%} limit; fallback = best SFT loss (step {chosen['step']})"
-    summary = {"start": {k.replace("eval_", "").replace("_loss", ""): (math.exp(start[k]) if k != "eval_sft_loss" else start[k])
-                         for k in need},
+        # user decision 2026-11-08: still ship the best-SFT-loss (select_key) checkpoint, flagged in selection.json
+        chosen = min(rows, key=pruner.score)
+        fallback = f"no checkpoint within the +{cfg['regression_limit']:.0%} limit; fallback = best {'SFT loss' if sel == ['eval_sft_loss'] else pruner.select_key} (step {chosen['step']})"
+    extra = [k for k in need if k not in ("eval_sft_loss", *lang_keys)]   # e.g. eval_chat_loss
+    summary = {"start": {k.replace("eval_", "").replace("_loss", ""): (math.exp(start[k]) if k in lang_keys else start[k])
+                         for k in need if k in start},
+               **({"select_key": pruner.select_key} if pruner.select_key != "eval_sft_loss" else {}),
                "regression_limit": cfg["regression_limit"], "train_hours": round(hours, 2),
                "history": [{"step": r["step"], "sft_loss": r["eval_sft_loss"],
+                            **{k.removeprefix("eval_"): r[k] for k in extra},
                             **{lg: math.exp(r[f"eval_{lg}_loss"]) for lg in LANGS}} for r in hist.rows if all(k in r for k in need)],
                "chosen_step": chosen["step"] if chosen else None,
                "note": fallback or (None if chosen else "NO checkpoint kept Bambara/French/English perplexity within the limit.")}

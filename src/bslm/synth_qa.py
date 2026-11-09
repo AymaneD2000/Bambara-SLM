@@ -29,6 +29,18 @@ SHEET = Path("reports/review/qa_review.csv")
 OUT = Path("data/interim/qa_synthetic.jsonl")
 _SPECIAL = re.compile(r"[ɛɔɲŋƐƆƝŊ]")
 _NUM = re.compile(r"(\d+)$")
+_PASSAGE_ROW = re.compile(r"^b\d+-(.+-\d+)-\d+$")     # b<batch>-<source>-<split>-<num>-<k> -> <source>-<split>-<num>
+
+
+def split_key(r: dict) -> str:
+    """Train/val split unit: the passage, so questions/summaries on one passage never straddle train and val.
+    Uses `passage_id` when the row has one, else derives it from the id (the review CSV has no passage_id column;
+    the derived form equals the raw passage_id, e.g. b2-bayelemabaga-train-0014779-3 -> bayelemabaga-train-0014779).
+    Chat rows (c<batch>-<n>) fall back to their own id: each one is an independent conversation."""
+    if r.get("passage_id"):
+        return r["passage_id"]
+    m = _PASSAGE_ROW.match(r["id"])
+    return m.group(1) if m else r["id"]
 
 
 def passages(n: int, min_sent: int = 3, max_sent: int = 6, max_chars: int = 700) -> None:
@@ -119,7 +131,7 @@ def apply() -> None:
                 continue
             if d in ("ok", "fix"):
                 ans = r["corrected_assistant"].strip() if d == "fix" else r["assistant"]
-                split = "val" if int(hashlib.md5(r["id"].encode()).hexdigest(), 16) % 20 == 0 else "train"
+                split = "val" if int(hashlib.md5(split_key(r).encode()).hexdigest(), 16) % 20 == 0 else "train"
                 hist = [[t.split("\nASSISTANT: ")[0].removeprefix("USER: "), t.split("\nASSISTANT: ")[1]]
                         for t in re.split(r"\n(?=USER: )", r["history"])] if r.get("history", "").strip() else None
                 f.write(json.dumps({"id": r["id"], "split": split, "task": r["task"], "user": r["user"], "history": hist,
