@@ -1,0 +1,53 @@
+# Stage 2 SFT v3: v3 data (multi-turn conversations, stitched chats, BT, djelia), loss on ALL assistant turns,
+# chat eval set in the selection key. Data: configs/sft_v3.yaml. Starts from the merged CPT model like v2.
+# 1 epoch: 294,554 rows (43.7 M tokens) / 32 = ~9,200 steps; ~5.8 s/step x 1.17 (mean length vs v2) = ~6.8 s -> ~17 h on a T4 (2 Kaggle sessions)
+model: runs/cpt_with_nllb/merged      # overridden on Kaggle by BSLM_BASE_MODEL
+data_dir: data/sft_v3                 # {"messages": [...]} train.jsonl / valid.jsonl (bslm build-sft)
+raw_eval_dir: data/cpt/with_nllb      # valid_bam / valid_fr / valid_en.jsonl: forgetting check (raw text perplexity)
+output_dir: runs/sft_v3
+seed: 13
+max_len: 1024                         # v3 rows: mean 148.5 tokens (v2 127.2), p99 715; 130 of 294,554 (0.04%) longer, dropped by sft.py
+epochs: 1
+batch_size: auto                      # 16 (>=70 GB), 8 (>=35 GB), 4 (T4)
+examples_per_step: 32                 # effective batch kept constant
+grad_accum: 8                         # only used when batch_size is a number
+eval_batch_size: auto                 # 1 on T4, 2 (>=35 GB), 4 (>=70 GB): raw-text eval uses 2,048-token sequences
+learning_rate: 8.0e-5                 # v2 (5e-5, r 32) used only +3% of the +10% ppl budget and its SFT loss was still falling; v1 (1e-4, no replay) lost +27%
+warmup_ratio: 0.03
+init_chat_tokens: true                # base = CPT model (untrained chat-token rows), as in v2
+loss_all_assistant_turns: true        # every assistant turn of a conversation is a target
+bf16: true                            # falls back to fp32 weights + fp16 mixed precision on T4
+lora:
+  r: 64
+  alpha: 128
+  dropout: 0.05
+  target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+eval_steps: 500
+logging_steps: 25
+sft_eval_examples: 1000               # held-out single-turn examples for eval_sft_loss
+chat_eval_file: data/sft_v3/chat_valid.jsonl   # held-out conversations (Claude-written + stitched) -> eval_chat_loss
+chat_eval_examples: 400
+select_key: eval_sft_loss+eval_chat_loss
+raw_eval_examples: 100                # per language (bam, fr, en) for the forgetting check
+raw_eval_seq_len: 2048
+fallback_selection: best_sft          # user 2026-11-08: if no checkpoint is within the limit, ship best SFT loss (flagged)
+regression_limit: 0.10                # Bambara, French, English perplexity may rise at most +10% vs the CPT model
+sample_prompts:
+  - "Traduis en français : N bɛ taa sugu la sini."
+  - "Traduis en bambara : La maison est grande."
+  - "Réponds en bambara : Mali faaba ye min ye ?"
+  - "Quelle est la capitale du Mali ?"
+  - "Translate into English: N bɛ taa sugu la sini."
+  - "I ni ce! I ka kɛnɛ wa?"
+dry_run_overrides:
+  output_dir: runs/dryrun_sft_v3
+  limit_examples: 24
+  sft_eval_examples: 8
+  chat_eval_examples: 8
+  raw_eval_examples: 2
+  raw_eval_seq_len: 256
+  batch_size: 2
+  grad_accum: 1
+  max_steps: 4
+  eval_steps: 2
+  num_workers: 0
