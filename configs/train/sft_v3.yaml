@@ -6,11 +6,11 @@ data_dir: data/sft_v3                 # {"messages": [...]} train.jsonl / valid.
 raw_eval_dir: data/cpt/with_nllb      # valid_bam / valid_fr / valid_en.jsonl: forgetting check (raw text perplexity)
 output_dir: runs/sft_v3
 seed: 13
-max_len: 1024                         # v3 rows: mean 148.5 tokens (v2 127.2), p99 715; 130 of 294,554 (0.04%) longer, dropped by sft.py
+max_len: 768                          # T4 memory: 1024 OOMed at batch 4 (first group_by_length batch = longest); 547 of 294,554 rows (0.19%) longer, dropped
 epochs: 1
-batch_size: auto                      # 16 (>=70 GB), 8 (>=35 GB), 4 (T4)
+batch_size: 2                         # T4 (15 GB, fp32 weights + r64 LoRA): 2 x 768 tokens peak < v2's 4 x 512
 examples_per_step: 32                 # effective batch kept constant
-grad_accum: 8                         # only used when batch_size is a number
+grad_accum: 16                        # 2 x 16 = 32 examples per step, same as v2
 eval_batch_size: auto                 # 1 on T4, 2 (>=35 GB), 4 (>=70 GB): raw-text eval uses 2,048-token sequences
 learning_rate: 8.0e-5                 # v2 (5e-5, r 32) used only +3% of the +10% ppl budget and its SFT loss was still falling; v1 (1e-4, no replay) lost +27%
 warmup_ratio: 0.03
