@@ -1,0 +1,32 @@
+{
+  "bam_val_spoken": {
+    "texts": 500,
+    "tokens": 11284,
+    "ppl": 20.05
+  },
+  "bam_val_web": {
+    "texts": 31,
+    "tokens": 24090,
+    "ppl": 9.94
+  },
+  "bam_val_written": {
+    "texts": 12,
+    "tokens": 889,
+    "ppl": 22.33
+  },
+  "belebele_bam": {
+    "texts": 462,
+    "tokens": 94792,
+    "ppl": 23.96
+  },
+  "belebele_fr": {
+    "texts": 462,
+    "tokens": 69113,
+    "ppl": 8.22
+  },
+  "belebele_en": {
+    "texts": 462,
+    "tokens": 44398,
+    "ppl": 16.02
+  }
+}
