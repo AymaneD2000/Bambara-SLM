@@ -55,6 +55,29 @@ def _prompt(src_lang: str, tgt_lang: str, shots: list[tuple[str, str]], text: st
     return head + body + f"{a}: {text}\n{b}:"
 
 
+def mt_prompts(tok, cfg: dict, s_lang: str, t_lang: str, src: list[str],
+               shots: list[tuple[str, str]] | None = None) -> list:
+    """Fixed MT prompts: chat instruction (cfg["_chat"]) or few-shot completion prompt (base models)."""
+    if cfg.get("_chat"):
+        # chat models (after SFT): zero-shot instruction through the chat template, thinking disabled
+        instr = cfg["mt"]["chat_instruction"][t_lang]
+        return [tok.apply_chat_template([{"role": "user", "content": instr.format(x=x)}],
+                                        add_generation_prompt=True, enable_thinking=False) for x in src]
+    return [tok.encode(_prompt(s_lang, t_lang, shots, x, cfg["lang_names"])) for x in src]
+
+
+def mt_generate(model, tok, cfg: dict, prompts: list, src: list[str]) -> list[str]:
+    """Greedy batched generation; max tokens = factor * source tokens + 16; keep the first output line."""
+    hyps, B = [], cfg["mt"]["batch_size"]
+    for i in range(0, len(prompts), B):
+        batch = prompts[i:i + B]
+        mx_tokens = [int(cfg["mt"]["max_new_tokens_factor"] * len(tok.encode(x)) + 16) for x in src[i:i + B]]
+        res = batch_generate(model, tok, batch, max_tokens=mx_tokens)
+        hyps += [t.replace("<think>", "").replace("</think>", "").strip().split("\n")[0].strip()
+                 for t in res.texts]
+    return hyps
+
+
 def run_mt(model, tok, cfg: dict, out_dir: Path) -> dict:
     names, rng = cfg["lang_names"], random.Random(cfg["seed"])
     shots = {lg: _few_shot(cfg, lg, random.Random(cfg["seed"])) for lg in ("fr", "en")}
@@ -71,29 +94,16 @@ def run_mt(model, tok, cfg: dict, out_dir: Path) -> dict:
             src = [p[0] if s_lang == "bam" else p[1] for p in pairs]
             ref = [p[1] if s_lang == "bam" else p[0] for p in pairs]
             sh = [(a, b) if s_lang == "bam" else (b, a) for a, b in shots[other]]
-            if cfg.get("_chat"):
-                # chat models (after SFT): zero-shot instruction through the chat template, thinking disabled
-                instr = cfg["mt"]["chat_instruction"][t_lang]
-                prompts = [tok.apply_chat_template([{"role": "user", "content": instr.format(x=x)}],
-                                                   add_generation_prompt=True, enable_thinking=False) for x in src]
-            else:
-                prompts = [tok.encode(_prompt(s_lang, t_lang, sh, x, names)) for x in src]
+            prompts = mt_prompts(tok, cfg, s_lang, t_lang, src, sh)
             hyps, t0 = [], time.time()
-            B = cfg["mt"]["batch_size"]
             done_file = gdir / f"{es}__{d}.jsonl"
             if done_file.exists():  # resume: reuse a finished set (same fixed sample and prompts)
                 prev = [json.loads(line) for line in done_file.open()]
                 if [r["src"] for r in prev] == src:
                     hyps = [r["hyp"] for r in prev]
                     console.print(f"{es}:{d}: reusing {len(hyps)} saved generations")
-            if hyps:
-                prompts = []
-            for i in range(0, len(prompts) if not hyps else 0, B):
-                batch = prompts[i:i + B]
-                mx_tokens = [int(cfg["mt"]["max_new_tokens_factor"] * len(tok.encode(x)) + 16) for x in src[i:i + B]]
-                res = batch_generate(model, tok, batch, max_tokens=mx_tokens)
-                hyps += [t.replace("<think>", "").replace("</think>", "").strip().split("\n")[0].strip()
-                         for t in res.texts]
+            if not hyps:
+                hyps = mt_generate(model, tok, cfg, prompts, src)
             bleu = sacrebleu.corpus_bleu(hyps, [ref]).score
             chrf = sacrebleu.corpus_chrf(hyps, [ref], word_order=2).score
             key = f"{es}:{d}"

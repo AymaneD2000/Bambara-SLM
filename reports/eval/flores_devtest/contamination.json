@@ -1,0 +1,42 @@
+{
+  "sft_v3": {
+    "bam": {
+      "exact": 0,
+      "contained_ge6w": 0,
+      "checked_ge6w": 1012,
+      "examples": []
+    },
+    "fr": {
+      "exact": 0,
+      "contained_ge6w": 0,
+      "checked_ge6w": 1012,
+      "examples": []
+    },
+    "en": {
+      "exact": 0,
+      "contained_ge6w": 0,
+      "checked_ge6w": 1012,
+      "examples": []
+    }
+  },
+  "cpt_with_nllb": {
+    "bam": {
+      "exact": 0,
+      "contained_ge6w": 0,
+      "checked_ge6w": 1012,
+      "examples": []
+    },
+    "fr": {
+      "exact": 0,
+      "contained_ge6w": 0,
+      "checked_ge6w": 1012,
+      "examples": []
+    },
+    "en": {
+      "exact": 0,
+      "contained_ge6w": 0,
+      "checked_ge6w": 1012,
+      "examples": []
+    }
+  }
+}
